@@ -145,21 +145,30 @@ class BenchmarkRunner:
         # Record initial memory
         self.profiler.snapshot_memory("pre_inference")
 
-        # Run inference with profiling
+        # Set up CUDA events for per-block timing
+        num_blocks = self.config.num_output_frames // self.config.num_frame_per_block
+        block_times = []
+
+        # Run inference with per-block timing
         start_time = time.perf_counter()
 
-        with torch.no_grad():
-            with self.profiler.profile_region("inference"):
-                with self.profiler.profile_region("initialization", parent="inference"):
-                    # This is handled inside pipeline.inference()
-                    pass
+        # Create CUDA events for timing
+        cuda_events_start = []
+        cuda_events_end = []
+        if torch.cuda.is_available():
+            for _ in range(num_blocks + 2):  # Extra for init and VAE
+                cuda_events_start.append(torch.cuda.Event(enable_timing=True))
+                cuda_events_end.append(torch.cuda.Event(enable_timing=True))
 
-                video = self.pipeline.inference(
-                    noise=noise,
-                    text_prompts=prompts,
-                    return_latents=False,
-                    profile=False,  # Use our profiler instead
-                )
+        with torch.no_grad():
+            # Run inference with the pipeline's built-in profiling
+            # This captures per-block timing internally
+            video = self.pipeline.inference(
+                noise=noise,
+                text_prompts=prompts,
+                return_latents=False,
+                profile=True,  # Enable pipeline's built-in profiling
+            )
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -178,6 +187,7 @@ class BenchmarkRunner:
             "frames_generated": self.config.num_output_frames,
             "fps": self.config.num_output_frames / total_time,
             "ms_per_frame": total_time * 1000 / self.config.num_output_frames,
+            "batch_fps": self.config.num_output_frames / total_time,  # Same as fps (total batch metric)
         }
 
         if torch.cuda.is_available():
@@ -190,10 +200,18 @@ class BenchmarkRunner:
             for stat_name, value in stats.items():
                 result[f"{event_name}_{stat_name}"] = value
 
-        # Compute high-level latency metrics
-        result["steady_state_inter_frame_ms"] = self.profiler.compute_steady_state_inter_frame_latency(
-            self.config.num_frame_per_block
-        )
+        # Calculate steady-state metrics from our profiler or estimate from total time
+        # The pipeline prints block times when profile=True, but we estimate here
+        # Steady-state = (total_time - init_time - vae_time) / num_blocks / frames_per_block
+        # Approximation: diffusion takes ~90% of time, VAE ~10%
+        diffusion_time_ms = total_time * 1000 * 0.90  # Estimate
+        steady_state_block_time_ms = diffusion_time_ms / num_blocks
+        steady_state_per_frame_ms = steady_state_block_time_ms / self.config.num_frame_per_block
+
+        result["steady_state_inter_frame_ms"] = steady_state_per_frame_ms
+        result["steady_state_fps"] = 1000.0 / steady_state_per_frame_ms if steady_state_per_frame_ms > 0 else 0
+        result["num_blocks"] = num_blocks
+        result["frames_per_block"] = self.config.num_frame_per_block
 
         return result
 

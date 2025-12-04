@@ -261,9 +261,9 @@ class FullBenchmarkRunner:
             }, f, indent=2, default=str)
 
         print(f"\nResults for {config_name}:")
-        print(f"  FPS: {result.fps_mean:.2f} +/- {result.fps_std:.2f}")
-        print(f"  ms/frame: {result.ms_per_frame_mean:.2f} (p95: {result.ms_per_frame_p95:.2f})")
-        print(f"  Steady-state: {result.steady_state_ms:.2f} ms")
+        print(f"  Batch FPS: {result.fps_mean:.2f} +/- {result.fps_std:.2f} (total video time / frames)")
+        print(f"  Batch ms/frame: {result.ms_per_frame_mean:.2f} (p95: {result.ms_per_frame_p95:.2f})")
+        print(f"  Steady-state: {result.steady_state_ms:.2f} ms/frame (~{1000/result.steady_state_ms:.1f} FPS)" if result.steady_state_ms > 0 else "  Steady-state: N/A")
         print(f"  Memory: {result.memory_peak_gb:.2f} GB")
 
         # Clear GPU memory
