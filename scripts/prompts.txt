@@ -1,0 +1,23 @@
+# Test prompts for LongLive quality evaluation
+# One prompt per line
+
+A cat walking gracefully on a sandy beach at sunset
+A time-lapse of clouds moving across a bright blue sky
+Ocean waves gently crashing on rocky shores
+A butterfly landing softly on a colorful flower in a garden
+A person playing piano in an elegant concert hall
+Cherry blossom petals falling in slow motion
+A campfire burning with crackling flames under the stars
+Rain drops falling on a window with city lights behind
+A hummingbird hovering near a red flower
+Northern lights dancing across a night sky
+A chef cooking in a busy restaurant kitchen
+Autumn leaves falling from trees in a forest
+A hot air balloon floating over mountains at sunrise
+Fireworks exploding in colorful patterns over a city
+A dog running happily through a grassy meadow
+Snow falling gently on a quiet village street
+A waterfall cascading down moss-covered rocks
+Candles flickering in a dimly lit room
+A train moving through a mountainous landscape
+The moon rising over a calm lake

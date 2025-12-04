@@ -1,0 +1,182 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "longlive-optimization"
+version = "0.1.0"
+description = "Latency optimization toolkit for LongLive real-time video generation"
+readme = "README_OPTIMIZATION.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Arnav Jain", email = "arnav@example.com"}
+]
+maintainers = [
+    {name = "Arnav Jain", email = "arnav@example.com"}
+]
+keywords = [
+    "video-generation",
+    "deep-learning",
+    "optimization",
+    "latency",
+    "diffusion-models",
+    "real-time",
+    "longlive",
+    "streaming"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.21.0",
+    "pyyaml>=6.0",
+    "omegaconf>=2.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flake8>=6.0.0",
+    "pre-commit>=3.0.0",
+]
+quantization = [
+    "torchao>=0.1.0",
+]
+demo = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "aiortc>=1.6.0",
+    "websockets>=11.0",
+]
+benchmark = [
+    "matplotlib>=3.7.0",
+    "pandas>=2.0.0",
+    "seaborn>=0.12.0",
+]
+all = [
+    "longlive-optimization[dev,quantization,demo,benchmark]",
+]
+
+[project.urls]
+Homepage = "https://github.com/arnavjain/longlive-optimization"
+Documentation = "https://github.com/arnavjain/longlive-optimization#readme"
+Repository = "https://github.com/arnavjain/longlive-optimization.git"
+Issues = "https://github.com/arnavjain/longlive-optimization/issues"
+
+[project.scripts]
+longlive-benchmark = "benchmarks.run_benchmark:main"
+longlive-demo = "demo.server:main"
+
+[tool.setuptools]
+packages = ["utils", "benchmarks", "demo"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "-ra",
+    "--strict-markers",
+]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "cuda: marks tests that require CUDA",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["utils", "benchmarks", "demo"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+show_missing = true
+fail_under = 70
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["utils", "benchmarks", "demo"]
+skip = [".git", ".venv", "venv", "build", "dist"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = [
+    "tests",
+    "build",
+    "dist",
+]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "E501", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+]

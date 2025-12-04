@@ -1,0 +1,15 @@
+# LongLive Optimization - Demo Requirements
+# Install with: pip install -r requirements-demo.txt
+
+-r requirements.txt
+
+# Web framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# WebRTC
+aiortc>=1.6.0
+websockets>=11.0
+
+# Media processing
+av>=10.0.0
