@@ -30,6 +30,7 @@ fi
 INSTANCE_TYPE="gpu_1x_h100_pcie"  # Single H100
 REGION="us-west-3"  # H100 PCIe available here
 SSH_KEY_NAME="lambda-gh200"  # Your SSH key name in Lambda Labs
+SSH_KEY_FILE="$HOME/.ssh/lambda_gh200"  # Local private key file
 LOCAL_RESULTS_DIR="./lambda_results"
 REPO_URL="https://github.com/ALJainProjects/longlive-optimization.git"
 
@@ -111,7 +112,7 @@ sleep 30
 # Run setup and benchmarks on instance
 echo ""
 echo "[4/7] Running setup on instance..."
-ssh -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
+ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
     set -e
 
     # Clone repository
@@ -129,7 +130,7 @@ REMOTE_SCRIPT
 
 echo ""
 echo "[5/7] Running benchmarks..."
-ssh ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
+ssh -i "$SSH_KEY_FILE" ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
     source ~/longlive-env/bin/activate
     cd ~/longlive-optimization
 
@@ -153,8 +154,8 @@ echo ""
 echo "[6/7] Downloading results..."
 mkdir -p "$LOCAL_RESULTS_DIR"
 
-scp -r ubuntu@$INSTANCE_IP:~/longlive-optimization/benchmark_results "$LOCAL_RESULTS_DIR/"
-scp -r ubuntu@$INSTANCE_IP:~/longlive-optimization/comparison_videos "$LOCAL_RESULTS_DIR/"
+scp -i "$SSH_KEY_FILE" -r ubuntu@$INSTANCE_IP:~/longlive-optimization/benchmark_results "$LOCAL_RESULTS_DIR/"
+scp -i "$SSH_KEY_FILE" -r ubuntu@$INSTANCE_IP:~/longlive-optimization/comparison_videos "$LOCAL_RESULTS_DIR/"
 
 echo "Results downloaded to: $LOCAL_RESULTS_DIR"
 
