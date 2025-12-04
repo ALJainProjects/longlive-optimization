@@ -234,9 +234,33 @@ class CausalInferencePipeline(torch.nn.Module):
             print(f"  - VAE decoding time: {vae_time:.2f} ms ({100 * vae_time / total_time:.2f}%)")
             print(f"  - Total time: {total_time:.2f} ms")
 
+            # Build profile results dictionary
+            profile_results = {
+                "init_time_ms": init_time,
+                "diffusion_time_ms": diffusion_time,
+                "vae_time_ms": vae_time,
+                "total_time_ms": total_time,
+                "block_times_ms": block_times,
+                "num_blocks": len(block_times),
+                "frames_per_block": self.num_frame_per_block,
+            }
+            # Compute derived metrics
+            if block_times:
+                # Skip first block (cold start), use rest for steady-state
+                steady_state_blocks = block_times[1:] if len(block_times) > 1 else block_times
+                profile_results["steady_state_block_time_ms"] = sum(steady_state_blocks) / len(steady_state_blocks)
+                profile_results["steady_state_per_frame_ms"] = profile_results["steady_state_block_time_ms"] / self.num_frame_per_block
+                profile_results["steady_state_fps"] = 1000.0 / profile_results["steady_state_per_frame_ms"]
+                profile_results["first_block_time_ms"] = block_times[0]
+                profile_results["time_to_first_frame_ms"] = init_time + block_times[0]
+
         if return_latents:
+            if profile:
+                return video, output.to(noise.device), profile_results
             return video, output.to(noise.device)
         else:
+            if profile:
+                return video, profile_results
             return video
 
     def _initialize_kv_cache(self, batch_size, dtype, device, kv_cache_size_override: int | None = None):

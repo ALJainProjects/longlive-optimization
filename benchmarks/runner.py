@@ -162,13 +162,20 @@ class BenchmarkRunner:
 
         with torch.no_grad():
             # Run inference with the pipeline's built-in profiling
-            # This captures per-block timing internally
-            video = self.pipeline.inference(
+            # This captures per-block timing internally and returns profile results
+            inference_result = self.pipeline.inference(
                 noise=noise,
                 text_prompts=prompts,
                 return_latents=False,
                 profile=True,  # Enable pipeline's built-in profiling
             )
+
+            # Unpack result (video, profile_results when profile=True)
+            if isinstance(inference_result, tuple):
+                video, profile_data = inference_result
+            else:
+                video = inference_result
+                profile_data = {}
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -194,24 +201,49 @@ class BenchmarkRunner:
             result["memory_peak_gb"] = torch.cuda.max_memory_allocated() / (1024**3)
             result["memory_reserved_gb"] = torch.cuda.memory_reserved() / (1024**3)
 
-        # Add profiler statistics
+        # Add profiler statistics from our profiler
         all_stats = self.profiler.get_all_statistics()
         for event_name, stats in all_stats.items():
             for stat_name, value in stats.items():
                 result[f"{event_name}_{stat_name}"] = value
 
-        # Calculate steady-state metrics from our profiler or estimate from total time
-        # The pipeline prints block times when profile=True, but we estimate here
-        # Steady-state = (total_time - init_time - vae_time) / num_blocks / frames_per_block
-        # Approximation: diffusion takes ~90% of time, VAE ~10%
-        diffusion_time_ms = total_time * 1000 * 0.90  # Estimate
-        steady_state_block_time_ms = diffusion_time_ms / num_blocks
-        steady_state_per_frame_ms = steady_state_block_time_ms / self.config.num_frame_per_block
+        # Use actual profile data from pipeline if available
+        if profile_data:
+            # Component breakdown
+            result["init_time_ms"] = profile_data.get("init_time_ms", 0)
+            result["diffusion_time_ms"] = profile_data.get("diffusion_time_ms", 0)
+            result["vae_time_ms"] = profile_data.get("vae_time_ms", 0)
+            result["pipeline_total_ms"] = profile_data.get("total_time_ms", 0)
 
-        result["steady_state_inter_frame_ms"] = steady_state_per_frame_ms
-        result["steady_state_fps"] = 1000.0 / steady_state_per_frame_ms if steady_state_per_frame_ms > 0 else 0
-        result["num_blocks"] = num_blocks
-        result["frames_per_block"] = self.config.num_frame_per_block
+            # Steady-state metrics (the key metrics for real-time performance)
+            result["steady_state_inter_frame_ms"] = profile_data.get("steady_state_per_frame_ms", 0)
+            result["steady_state_fps"] = profile_data.get("steady_state_fps", 0)
+            result["steady_state_block_time_ms"] = profile_data.get("steady_state_block_time_ms", 0)
+
+            # Time-to-first-frame (critical for interactivity)
+            result["time_to_first_frame_ms"] = profile_data.get("time_to_first_frame_ms", 0)
+            result["first_block_time_ms"] = profile_data.get("first_block_time_ms", 0)
+
+            # Per-block timing for analysis
+            result["block_times_ms"] = profile_data.get("block_times_ms", [])
+            result["num_blocks"] = profile_data.get("num_blocks", num_blocks)
+            result["frames_per_block"] = profile_data.get("frames_per_block", self.config.num_frame_per_block)
+
+            # Component percentages
+            if result["pipeline_total_ms"] > 0:
+                result["init_pct"] = 100 * result["init_time_ms"] / result["pipeline_total_ms"]
+                result["diffusion_pct"] = 100 * result["diffusion_time_ms"] / result["pipeline_total_ms"]
+                result["vae_pct"] = 100 * result["vae_time_ms"] / result["pipeline_total_ms"]
+        else:
+            # Fallback to estimates if profile data not available
+            diffusion_time_ms = total_time * 1000 * 0.90
+            steady_state_block_time_ms = diffusion_time_ms / num_blocks
+            steady_state_per_frame_ms = steady_state_block_time_ms / self.config.num_frame_per_block
+
+            result["steady_state_inter_frame_ms"] = steady_state_per_frame_ms
+            result["steady_state_fps"] = 1000.0 / steady_state_per_frame_ms if steady_state_per_frame_ms > 0 else 0
+            result["num_blocks"] = num_blocks
+            result["frames_per_block"] = self.config.num_frame_per_block
 
         return result
 
@@ -256,13 +288,34 @@ class BenchmarkRunner:
         """Compute summary statistics across iterations."""
         import numpy as np
 
+        def safe_mean(values):
+            valid = [v for v in values if v is not None and v > 0]
+            return float(np.mean(valid)) if valid else 0.0
+
+        def safe_std(values):
+            valid = [v for v in values if v is not None and v > 0]
+            return float(np.std(valid)) if len(valid) > 1 else 0.0
+
+        def safe_percentile(values, pct):
+            valid = [v for v in values if v is not None and v > 0]
+            return float(np.percentile(valid, pct)) if valid else 0.0
+
         # Extract key metrics
         total_times = [r["total_time_ms"] for r in results]
         fps_values = [r["fps"] for r in results]
         ms_per_frame_values = [r["ms_per_frame"] for r in results]
         memory_peaks = [r.get("memory_peak_gb", 0) for r in results]
 
+        # New detailed metrics
+        steady_state_fps = [r.get("steady_state_fps", 0) for r in results]
+        steady_state_ms = [r.get("steady_state_inter_frame_ms", 0) for r in results]
+        time_to_first = [r.get("time_to_first_frame_ms", 0) for r in results]
+        init_times = [r.get("init_time_ms", 0) for r in results]
+        diffusion_times = [r.get("diffusion_time_ms", 0) for r in results]
+        vae_times = [r.get("vae_time_ms", 0) for r in results]
+
         summary = {
+            # Batch-level metrics (total video generation)
             "total_time_ms": {
                 "mean": float(np.mean(total_times)),
                 "std": float(np.std(total_times)),
@@ -289,9 +342,31 @@ class BenchmarkRunner:
                 "mean": float(np.mean(memory_peaks)),
                 "max": float(np.max(memory_peaks)),
             },
+
+            # Steady-state metrics (real-time performance after warmup)
             "steady_state_inter_frame_ms": {
-                "mean": float(np.mean([r.get("steady_state_inter_frame_ms", 0) for r in results])),
+                "mean": safe_mean(steady_state_ms),
+                "std": safe_std(steady_state_ms),
+                "p50": safe_percentile(steady_state_ms, 50),
+                "p95": safe_percentile(steady_state_ms, 95),
             },
+            "steady_state_fps": {
+                "mean": safe_mean(steady_state_fps),
+                "std": safe_std(steady_state_fps),
+            },
+
+            # Time-to-first-frame (interactivity)
+            "time_to_first_frame_ms": {
+                "mean": safe_mean(time_to_first),
+                "std": safe_std(time_to_first),
+            },
+
+            # Component breakdown
+            "init_time_ms": {"mean": safe_mean(init_times)},
+            "diffusion_time_ms": {"mean": safe_mean(diffusion_times)},
+            "vae_time_ms": {"mean": safe_mean(vae_times)},
+
+            # Metadata
             "num_iterations": len(results),
             "num_frames_per_iteration": self.config.num_output_frames,
         }
