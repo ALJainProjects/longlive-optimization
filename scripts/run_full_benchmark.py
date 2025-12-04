@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from benchmarks.config import BenchmarkConfig
 from benchmarks.visualization import generate_time_budget_report, generate_optimization_comparison_chart
 from utils.profiler import LongLiveProfiler
+from utils.job_callbacks import JobReporter, create_reporter
 
 
 @dataclass
@@ -69,7 +70,8 @@ class FullBenchmarkRunner:
         self,
         output_dir: str = "benchmark_results",
         config_path: str = "configs/longlive_optimized.yaml",
-        quick: bool = False
+        quick: bool = False,
+        slack_webhook: Optional[str] = None,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +80,14 @@ class FullBenchmarkRunner:
 
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.results: List[BenchmarkResult] = []
+
+        # Initialize job reporter for progress tracking
+        self.reporter = JobReporter(
+            webhook_url=slack_webhook or os.environ.get("SLACK_WEBHOOK_URL"),
+            webhook_format="slack",
+            progress_file="/tmp/benchmark_progress.json",
+            log_file=str(self.output_dir / f"benchmark_{self.timestamp}.log"),
+        )
 
         # Check GPU
         if not torch.cuda.is_available():
@@ -194,13 +204,23 @@ class FullBenchmarkRunner:
 
         return configs
 
-    def run_single_config(self, config: Dict[str, Any]) -> BenchmarkResult:
+    def run_single_config(self, config: Dict[str, Any], config_idx: int, total_configs: int) -> BenchmarkResult:
         """Run benchmark for a single configuration."""
 
         config_name = config.pop("name")
         print(f"\n{'='*60}")
         print(f"Running: {config_name}")
         print(f"{'='*60}")
+
+        # Update progress
+        progress = 10 + (80 * config_idx / total_configs)
+        self.reporter.update_progress(
+            stage="benchmarking",
+            progress=progress,
+            task=f"Running {config_name}",
+            tasks_completed=config_idx,
+        )
+        self.reporter.log(f"Starting benchmark: {config_name}")
 
         # Create benchmark config
         benchmark_config = BenchmarkConfig(**config)
@@ -265,17 +285,44 @@ class FullBenchmarkRunner:
         configs = self.get_configurations()
         print(f"\nConfigurations to test: {len(configs)}")
 
-        for config in configs:
+        # Start job reporting
+        self.reporter.start_job("benchmark", total_tasks=len(configs))
+        self.reporter.update_progress(stage="setup", progress=5, task="Loading configurations")
+
+        for idx, config in enumerate(configs):
             try:
-                result = self.run_single_config(config.copy())
+                result = self.run_single_config(config.copy(), idx, len(configs))
                 self.results.append(result)
+
+                # Report result
+                self.reporter.update_progress(
+                    fps=result.fps_mean,
+                    latency_ms=result.ms_per_frame_mean,
+                    memory_gb=result.memory_peak_gb,
+                    metrics={config.get("name", f"config_{idx}"): {
+                        "fps": result.fps_mean,
+                        "latency_ms": result.ms_per_frame_mean,
+                    }}
+                )
+                self.reporter.log(f"Completed {result.config_name}: {result.fps_mean:.1f} FPS, {result.ms_per_frame_mean:.1f} ms")
+
             except Exception as e:
                 print(f"ERROR running {config.get('name', 'unknown')}: {e}")
+                self.reporter.error(f"Failed {config.get('name', 'unknown')}: {e}")
                 import traceback
                 traceback.print_exc()
 
         # Generate summary
+        self.reporter.update_progress(stage="generating_report", progress=95, task="Generating summary")
         self.generate_summary()
+
+        # Complete job
+        best_fps = max(self.results, key=lambda x: x.fps_mean) if self.results else None
+        self.reporter.complete_job(summary={
+            "best_config": best_fps.config_name if best_fps else None,
+            "best_fps": best_fps.fps_mean if best_fps else 0,
+            "total_configs": len(self.results),
+        })
 
     def generate_summary(self):
         """Generate summary reports."""
@@ -355,12 +402,15 @@ def main():
                         help="Base config file")
     parser.add_argument("--quick", action="store_true",
                         help="Quick mode (fewer frames/iterations)")
+    parser.add_argument("--slack-webhook", type=str,
+                        help="Slack webhook URL for progress notifications")
     args = parser.parse_args()
 
     runner = FullBenchmarkRunner(
         output_dir=args.output_dir,
         config_path=args.config,
-        quick=args.quick
+        quick=args.quick,
+        slack_webhook=args.slack_webhook,
     )
 
     start_time = time.time()
