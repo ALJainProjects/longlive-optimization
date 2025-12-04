@@ -178,16 +178,28 @@ class LambdaLabsAPI:
 class SSHJobMonitor:
     """Monitor job progress via SSH."""
 
-    def __init__(self, host: str, user: str = "ubuntu"):
+    # Default SSH key path for Lambda Labs instances
+    DEFAULT_SSH_KEY = os.path.expanduser("~/.ssh/lambda_gh200")
+
+    def __init__(self, host: str, user: str = "ubuntu", ssh_key: Optional[str] = None):
         self.host = host
         self.user = user
+        # Use provided key, or default, or try without key
+        self.ssh_key = ssh_key or (self.DEFAULT_SSH_KEY if os.path.exists(self.DEFAULT_SSH_KEY) else None)
 
     def _ssh_cmd(self, command: str, timeout: int = 10) -> Optional[str]:
         """Execute SSH command."""
         try:
+            ssh_args = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
+                        "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"]
+            # Add key file if available
+            if self.ssh_key and os.path.exists(self.ssh_key):
+                ssh_args.extend(["-i", self.ssh_key])
+            ssh_args.append(f"{self.user}@{self.host}")
+            ssh_args.append(command)
+
             result = subprocess.run(
-                ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
-                 f"{self.user}@{self.host}", command],
+                ssh_args,
                 capture_output=True, text=True, timeout=timeout
             )
             return result.stdout.strip()
@@ -278,6 +290,29 @@ class SSHJobMonitor:
             }
         return {}
 
+    def get_job_progress_file(self) -> Optional[Dict]:
+        """Read job progress JSON from remote instance."""
+        output = self._ssh_cmd(
+            "cat /tmp/benchmark_progress.json 2>/dev/null || "
+            "cat ~/longlive-optimization/benchmark_results/progress.json 2>/dev/null"
+        )
+        if output:
+            try:
+                return json.loads(output)
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    def get_live_benchmark_output(self, lines: int = 20) -> str:
+        """Get live benchmark output from screen or tmux."""
+        # Try to get output from various sources
+        output = self._ssh_cmd(
+            f"tail -{lines} ~/longlive-optimization/benchmark_results/*.log 2>/dev/null || "
+            f"tail -{lines} /tmp/benchmark*.log 2>/dev/null || "
+            "pgrep -a python | head -5"
+        )
+        return output or ""
+
 
 class SlackNotifier:
     """Send alerts to Slack."""
@@ -314,12 +349,14 @@ class LambdaMonitor:
         instance_ip: Optional[str] = None,
         slack_webhook: Optional[str] = None,
         cost_limit: Optional[float] = None,
+        ssh_key: Optional[str] = None,
     ):
         self.api = LambdaLabsAPI(api_key)
         self.instance_id = instance_id
         self.instance_ip = instance_ip
         self.slack = SlackNotifier(slack_webhook) if slack_webhook else None
         self.cost_limit = cost_limit
+        self.ssh_key = ssh_key
         self.state = MonitorState()
         self.start_time = datetime.now()
         self._cost_alert_sent = False

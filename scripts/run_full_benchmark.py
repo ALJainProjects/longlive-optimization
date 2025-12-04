@@ -124,7 +124,7 @@ class FullBenchmarkRunner:
                 "benchmark_iterations": iterations,
                 "warmup_iterations": warmup,
                 "use_torch_compile": True,
-                "compile_mode": "reduce-overhead",
+                "compile_mode": "default",  # Use default mode - reduce-overhead conflicts with KV cache mutations
                 "use_fp8": False,
                 "local_attn_size": 12,
             },
@@ -164,7 +164,7 @@ class FullBenchmarkRunner:
                 "benchmark_iterations": iterations,
                 "warmup_iterations": warmup,
                 "use_torch_compile": True,
-                "compile_mode": "reduce-overhead",
+                "compile_mode": "default",  # Use default mode - reduce-overhead conflicts with KV cache mutations
                 "use_fp8": False,
                 "local_attn_size": 9,
             },
@@ -174,7 +174,7 @@ class FullBenchmarkRunner:
                 "benchmark_iterations": iterations,
                 "warmup_iterations": warmup,
                 "use_torch_compile": True,
-                "compile_mode": "reduce-overhead",
+                "compile_mode": "default",  # Use default mode
                 "use_fp8": True,
                 "local_attn_size": 12,
             },
@@ -185,7 +185,7 @@ class FullBenchmarkRunner:
                 "benchmark_iterations": iterations,
                 "warmup_iterations": warmup,
                 "use_torch_compile": True,
-                "compile_mode": "reduce-overhead",
+                "compile_mode": "default",  # Use default mode
                 "use_fp8": True,
                 "local_attn_size": 9,
             },
@@ -196,7 +196,7 @@ class FullBenchmarkRunner:
                 "benchmark_iterations": iterations,
                 "warmup_iterations": warmup,
                 "use_torch_compile": True,
-                "compile_mode": "max-autotune",
+                "compile_mode": "default",  # max-autotune also conflicts with dynamic KV cache
                 "use_fp8": True,
                 "local_attn_size": 6,
             },
