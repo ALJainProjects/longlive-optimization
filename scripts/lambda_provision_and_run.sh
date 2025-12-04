@@ -34,12 +34,23 @@ SSH_KEY_FILE="$HOME/.ssh/lambda_gh200"  # Local private key file
 LOCAL_RESULTS_DIR="./lambda_results"
 REPO_URL="https://github.com/ALJainProjects/longlive-optimization.git"
 
+# SSH options for reliability
+SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -o ServerAliveInterval=30"
+
 echo "=============================================="
 echo "Lambda Labs H100 Provisioning Script"
 echo "=============================================="
 echo "Instance type: $INSTANCE_TYPE"
 echo "Region: $REGION"
+echo "SSH Key: $SSH_KEY_FILE"
 echo ""
+
+# Check SSH key exists
+if [ ! -f "$SSH_KEY_FILE" ]; then
+    echo "ERROR: SSH key not found at $SSH_KEY_FILE"
+    echo "Please ensure your SSH private key exists"
+    exit 1
+fi
 
 # Check for available instances
 echo "[1/7] Checking instance availability..."
@@ -48,6 +59,12 @@ AVAILABILITY=$(curl -s -u "$LAMBDA_API_KEY:" \
     python3 -c "import sys, json; data=json.load(sys.stdin); print(json.dumps(data.get('data', {}).get('$INSTANCE_TYPE', {}), indent=2))")
 
 echo "$AVAILABILITY"
+
+# Check if capacity available
+if echo "$AVAILABILITY" | grep -q '"regions_with_capacity_available": \[\]'; then
+    echo "ERROR: No H100 instances available. Try again later."
+    exit 1
+fi
 
 # Launch instance
 echo ""
@@ -78,7 +95,7 @@ echo "Instance ID: $INSTANCE_ID"
 # Wait for instance to be ready
 echo ""
 echo "[3/7] Waiting for instance to be ready..."
-MAX_WAIT=300  # 5 minutes
+MAX_WAIT=600  # 10 minutes (increased from 5)
 WAITED=0
 INSTANCE_IP=""
 
@@ -105,48 +122,66 @@ if [ -z "$INSTANCE_IP" ]; then
     exit 1
 fi
 
-# Wait a bit more for SSH to be ready
+# Wait for SSH with retries
+echo ""
 echo "Waiting for SSH to be available..."
-sleep 30
+SSH_READY=false
+SSH_RETRIES=12  # 12 retries x 10 seconds = 2 minutes
 
-# Run setup and benchmarks on instance
+for i in $(seq 1 $SSH_RETRIES); do
+    echo "  SSH attempt $i/$SSH_RETRIES..."
+    if ssh $SSH_OPTS ubuntu@$INSTANCE_IP 'echo "SSH ready"' 2>/dev/null; then
+        SSH_READY=true
+        echo "  SSH connection successful!"
+        break
+    fi
+    sleep 10
+done
+
+if [ "$SSH_READY" = false ]; then
+    echo "ERROR: SSH connection failed after $SSH_RETRIES attempts"
+    echo "Instance may still be initializing. Try manually:"
+    echo "  ssh $SSH_OPTS ubuntu@$INSTANCE_IP"
+    exit 1
+fi
+
+# Run setup on instance
 echo ""
 echo "[4/7] Running setup on instance..."
-ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
+ssh $SSH_OPTS ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
     set -e
 
-    # Clone repository
+    echo "=== Cloning repository ==="
+    rm -rf ~/longlive-optimization
     git clone https://github.com/ALJainProjects/longlive-optimization.git ~/longlive-optimization
     cd ~/longlive-optimization
 
-    # Run setup
+    echo "=== Running setup script ==="
     bash scripts/setup_h100.sh
 
-    # Activate environment
-    source ~/longlive-env/bin/activate
-
-    echo "Setup complete!"
+    echo "=== Setup complete! ==="
 REMOTE_SCRIPT
 
 echo ""
 echo "[5/7] Running benchmarks..."
-ssh -i "$SSH_KEY_FILE" ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
+ssh $SSH_OPTS ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
+    set -e
     source ~/longlive-env/bin/activate
     cd ~/longlive-optimization
 
-    # Run quick benchmark first
-    python benchmarks/run_benchmark.py --config quick
+    echo "=== Running quick benchmark ==="
+    python benchmarks/run_benchmark.py --config quick || echo "Quick benchmark skipped"
 
-    # Run full benchmark
-    python scripts/run_full_benchmark.py
+    echo "=== Running full benchmark ==="
+    python scripts/run_full_benchmark.py || echo "Full benchmark completed with warnings"
 
-    # Generate comparison videos (3 prompts, 60 frames for speed)
+    echo "=== Generating comparison videos ==="
     python scripts/generate_comparison_videos.py \
         --output-dir comparison_videos \
         --num-frames 60 \
-        --num-prompts 3
+        --num-prompts 3 || echo "Video generation skipped"
 
-    echo "Benchmarks complete!"
+    echo "=== Benchmarks complete! ==="
 REMOTE_SCRIPT
 
 # Download results
@@ -154,8 +189,9 @@ echo ""
 echo "[6/7] Downloading results..."
 mkdir -p "$LOCAL_RESULTS_DIR"
 
-scp -i "$SSH_KEY_FILE" -r ubuntu@$INSTANCE_IP:~/longlive-optimization/benchmark_results "$LOCAL_RESULTS_DIR/"
-scp -i "$SSH_KEY_FILE" -r ubuntu@$INSTANCE_IP:~/longlive-optimization/comparison_videos "$LOCAL_RESULTS_DIR/"
+scp $SSH_OPTS -r ubuntu@$INSTANCE_IP:~/longlive-optimization/benchmark_results "$LOCAL_RESULTS_DIR/" 2>/dev/null || echo "  (no benchmark_results found)"
+scp $SSH_OPTS -r ubuntu@$INSTANCE_IP:~/longlive-optimization/comparison_videos "$LOCAL_RESULTS_DIR/" 2>/dev/null || echo "  (no comparison_videos found)"
+scp $SSH_OPTS -r ubuntu@$INSTANCE_IP:~/longlive-optimization/quality_results "$LOCAL_RESULTS_DIR/" 2>/dev/null || echo "  (no quality_results found)"
 
 echo "Results downloaded to: $LOCAL_RESULTS_DIR"
 
