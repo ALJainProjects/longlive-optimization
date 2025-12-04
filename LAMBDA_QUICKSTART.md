@@ -4,7 +4,7 @@
 
 ```bash
 # Clone and setup (run once)
-git clone https://github.com/arnavjain/longlive-optimization.git && \
+git clone https://github.com/ALJainProjects/longlive-optimization.git && \
 cd longlive-optimization && \
 bash scripts/setup_h100.sh
 ```

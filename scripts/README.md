@@ -6,7 +6,7 @@ Scripts for running benchmarks on Lambda Labs H100.
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/arnavjain/longlive-optimization.git
+git clone https://github.com/ALJainProjects/longlive-optimization.git
 cd longlive-optimization
 
 # 2. Run setup (installs all dependencies + downloads models)

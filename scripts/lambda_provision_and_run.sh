@@ -31,7 +31,7 @@ INSTANCE_TYPE="gpu_1x_h100_pcie"  # Single H100
 REGION="us-west-3"  # H100 PCIe available here
 SSH_KEY_NAME="lambda-gh200"  # Your SSH key name in Lambda Labs
 LOCAL_RESULTS_DIR="./lambda_results"
-REPO_URL="https://github.com/arnavjain/longlive-optimization.git"
+REPO_URL="https://github.com/ALJainProjects/longlive-optimization.git"
 
 echo "=============================================="
 echo "Lambda Labs H100 Provisioning Script"
@@ -115,7 +115,7 @@ ssh -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << 'REMOTE_SCRIPT'
     set -e
 
     # Clone repository
-    git clone https://github.com/arnavjain/longlive-optimization.git ~/longlive-optimization
+    git clone https://github.com/ALJainProjects/longlive-optimization.git ~/longlive-optimization
     cd ~/longlive-optimization
 
     # Run setup
