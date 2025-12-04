@@ -52,6 +52,13 @@ class BenchmarkResult:
     num_frames: int
     num_iterations: int
 
+    # Detailed timing breakdown
+    steady_state_fps: Optional[float] = None
+    time_to_first_frame_ms: Optional[float] = None
+    init_time_ms: Optional[float] = None
+    diffusion_time_ms: Optional[float] = None
+    vae_time_ms: Optional[float] = None
+
     # Quality metrics (if computed)
     fvd_score: Optional[float] = None
     clip_score: Optional[float] = None
@@ -249,6 +256,12 @@ class FullBenchmarkRunner:
             total_time_s=summary["total_time_ms"]["mean"] / 1000,
             num_frames=benchmark_config.num_output_frames,
             num_iterations=summary["num_iterations"],
+            # New detailed metrics
+            steady_state_fps=summary.get("steady_state_fps", {}).get("mean"),
+            time_to_first_frame_ms=summary.get("time_to_first_frame_ms", {}).get("mean"),
+            init_time_ms=summary.get("init_time_ms", {}).get("mean"),
+            diffusion_time_ms=summary.get("diffusion_time_ms", {}).get("mean"),
+            vae_time_ms=summary.get("vae_time_ms", {}).get("mean"),
         )
 
         # Save individual result
@@ -261,9 +274,19 @@ class FullBenchmarkRunner:
             }, f, indent=2, default=str)
 
         print(f"\nResults for {config_name}:")
-        print(f"  Batch FPS: {result.fps_mean:.2f} +/- {result.fps_std:.2f} (total video time / frames)")
+        print(f"  Batch FPS: {result.fps_mean:.2f} +/- {result.fps_std:.2f}")
         print(f"  Batch ms/frame: {result.ms_per_frame_mean:.2f} (p95: {result.ms_per_frame_p95:.2f})")
-        print(f"  Steady-state: {result.steady_state_ms:.2f} ms/frame (~{1000/result.steady_state_ms:.1f} FPS)" if result.steady_state_ms > 0 else "  Steady-state: N/A")
+        if result.steady_state_fps and result.steady_state_fps > 0:
+            print(f"  Steady-state: {result.steady_state_ms:.2f} ms/frame ({result.steady_state_fps:.1f} FPS) ← Paper metric")
+        else:
+            print(f"  Steady-state: N/A")
+        if result.time_to_first_frame_ms:
+            print(f"  Time-to-first-frame: {result.time_to_first_frame_ms:.1f} ms")
+        if result.init_time_ms and result.diffusion_time_ms and result.vae_time_ms:
+            total = result.init_time_ms + result.diffusion_time_ms + result.vae_time_ms
+            print(f"  Breakdown: Init {result.init_time_ms:.0f}ms ({100*result.init_time_ms/total:.0f}%) | "
+                  f"Diffusion {result.diffusion_time_ms:.0f}ms ({100*result.diffusion_time_ms/total:.0f}%) | "
+                  f"VAE {result.vae_time_ms:.0f}ms ({100*result.vae_time_ms/total:.0f}%)")
         print(f"  Memory: {result.memory_peak_gb:.2f} GB")
 
         # Clear GPU memory
@@ -327,29 +350,38 @@ class FullBenchmarkRunner:
     def generate_summary(self):
         """Generate summary reports."""
 
-        print("\n" + "="*80)
+        print("\n" + "="*100)
         print("BENCHMARK SUMMARY")
-        print("="*80)
+        print("="*100)
 
-        # Print comparison table
-        print(f"\n{'Config':<20} {'FPS':>10} {'ms/frame':>12} {'p95 ms':>10} {'Memory GB':>12} {'Target':>10}")
-        print("-"*80)
+        # Print comparison table with both batch and steady-state FPS
+        print(f"\n{'Config':<18} {'Batch FPS':>10} {'Batch ms':>10} {'SS FPS':>10} {'SS ms':>10} {'TTFF ms':>10} {'Mem GB':>10} {'<40ms':>8}")
+        print("-"*100)
 
         target_ms = 40.0
 
         for r in self.results:
-            meets_target = "✓" if r.ms_per_frame_mean <= target_ms else "✗"
-            print(f"{r.config_name:<20} {r.fps_mean:>10.2f} {r.ms_per_frame_mean:>12.2f} "
-                  f"{r.ms_per_frame_p95:>10.2f} {r.memory_peak_gb:>12.2f} {meets_target:>10}")
+            ss_fps = f"{r.steady_state_fps:.1f}" if r.steady_state_fps else "N/A"
+            ss_ms = f"{r.steady_state_ms:.1f}" if r.steady_state_ms > 0 else "N/A"
+            ttff = f"{r.time_to_first_frame_ms:.0f}" if r.time_to_first_frame_ms else "N/A"
+            meets_target = "✓" if (r.steady_state_ms > 0 and r.steady_state_ms <= target_ms) else ("?" if r.steady_state_ms == 0 else "✗")
+            print(f"{r.config_name:<18} {r.fps_mean:>10.2f} {r.ms_per_frame_mean:>10.1f} "
+                  f"{ss_fps:>10} {ss_ms:>10} {ttff:>10} {r.memory_peak_gb:>10.2f} {meets_target:>8}")
 
-        print("-"*80)
+        print("-"*100)
+        print("SS = Steady-state (paper metric), TTFF = Time-to-first-frame")
 
-        # Find best configuration
+        # Find best configuration by steady-state FPS if available
+        results_with_ss = [r for r in self.results if r.steady_state_fps and r.steady_state_fps > 0]
+        if results_with_ss:
+            best_ss_fps = max(results_with_ss, key=lambda x: x.steady_state_fps)
+            print(f"\nBest Steady-State FPS: {best_ss_fps.config_name} ({best_ss_fps.steady_state_fps:.1f} FPS, {best_ss_fps.steady_state_ms:.1f} ms)")
+
         best_fps = max(self.results, key=lambda x: x.fps_mean)
         best_latency = min(self.results, key=lambda x: x.ms_per_frame_mean)
 
-        print(f"\nBest FPS: {best_fps.config_name} ({best_fps.fps_mean:.2f} FPS)")
-        print(f"Best Latency: {best_latency.config_name} ({best_latency.ms_per_frame_mean:.2f} ms)")
+        print(f"Best Batch FPS: {best_fps.config_name} ({best_fps.fps_mean:.2f} FPS)")
+        print(f"Best Batch Latency: {best_latency.config_name} ({best_latency.ms_per_frame_mean:.2f} ms)")
 
         # Calculate speedup
         baseline = next((r for r in self.results if r.config_name == "baseline"), None)
@@ -358,7 +390,10 @@ class FullBenchmarkRunner:
             for r in self.results:
                 if r.config_name != "baseline":
                     speedup = baseline.ms_per_frame_mean / r.ms_per_frame_mean
-                    print(f"  {r.config_name}: {speedup:.2f}x")
+                    ss_speedup = ""
+                    if baseline.steady_state_ms > 0 and r.steady_state_ms > 0:
+                        ss_speedup = f" (SS: {baseline.steady_state_ms / r.steady_state_ms:.2f}x)"
+                    print(f"  {r.config_name}: {speedup:.2f}x{ss_speedup}")
 
         # Save summary JSON
         summary_path = self.output_dir / f"summary_{self.timestamp}.json"
