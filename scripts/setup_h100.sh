@@ -147,13 +147,30 @@ echo ""
 echo "=============================================="
 echo "Setup Complete!"
 echo "=============================================="
-echo ""
-echo "To activate the environment:"
-echo "  source ~/longlive-env/bin/activate"
-echo ""
-echo "To run benchmarks:"
-echo "  python scripts/run_full_benchmark.py"
-echo ""
-echo "To run quick test:"
-echo "  python scripts/run_full_benchmark.py --quick"
-echo ""
+
+# Auto-start benchmark if --run-benchmark flag is passed
+if [[ "$1" == "--run-benchmark" ]] || [[ "$RUN_BENCHMARK" == "1" ]]; then
+    echo ""
+    echo "=============================================="
+    echo "Starting Benchmark Suite..."
+    echo "=============================================="
+    python scripts/run_full_benchmark.py --quick
+elif [[ "$1" == "--run-full-benchmark" ]] || [[ "$RUN_FULL_BENCHMARK" == "1" ]]; then
+    echo ""
+    echo "=============================================="
+    echo "Starting Full Benchmark Suite..."
+    echo "=============================================="
+    python scripts/run_full_benchmark.py
+else
+    echo ""
+    echo "To activate the environment:"
+    echo "  source ~/longlive-env/bin/activate"
+    echo ""
+    echo "To run benchmarks:"
+    echo "  python scripts/run_full_benchmark.py"
+    echo ""
+    echo "To run quick test:"
+    echo "  python scripts/run_full_benchmark.py --quick"
+    echo ""
+    echo "Or re-run this script with --run-benchmark flag to auto-start"
+fi
