@@ -538,7 +538,8 @@ def main():
     parser.add_argument("--instance-id", type=str, help="Instance ID to monitor")
     parser.add_argument("--instance-ip", type=str, help="Instance IP to monitor")
     parser.add_argument("--auto", action="store_true", help="Auto-detect running instance")
-    parser.add_argument("--watch", action="store_true", help="Continuous monitoring")
+    parser.add_argument("--watch", action="store_true", default=True, help="Continuous monitoring (default: True)")
+    parser.add_argument("--no-watch", action="store_true", help="Single status check (disable continuous)")
     parser.add_argument("--interval", type=int, default=10, help="Refresh interval (seconds)")
     parser.add_argument("--slack-webhook", type=str, help="Slack webhook URL for alerts")
     parser.add_argument("--cost-limit", type=float, help="Cost limit for alerts ($)")
@@ -572,7 +573,9 @@ def main():
     )
 
     try:
-        if args.watch:
+        # Continuous monitoring is default; use --no-watch for single check
+        watch_mode = args.watch and not args.no_watch
+        if watch_mode:
             while True:
                 clear_screen()
                 monitor.update()
