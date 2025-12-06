@@ -64,6 +64,9 @@ class BenchmarkRunner:
         print(f"Initializing pipeline on {self.device}...")
         self.pipeline = CausalInferencePipeline(args, device=self.device)
 
+        # Load LongLive distilled weights (CRITICAL for performance!)
+        self._load_longlive_weights()
+
         # Apply optimizations
         if self.config.use_torch_compile:
             print(f"Applying torch.compile with mode={self.config.compile_mode}...")
@@ -110,6 +113,87 @@ class BenchmarkRunner:
             print("Warning: torchao not available, skipping FP8 quantization.")
         except Exception as e:
             print(f"Warning: FP8 quantization failed: {e}")
+
+    def _load_longlive_weights(self):
+        """Load LongLive distilled weights and LoRA adapters.
+
+        This is CRITICAL for performance. Without these weights, the model runs
+        at ~4 FPS instead of the paper's 20.7 FPS.
+        """
+        import os
+
+        # Paths for LongLive weights
+        generator_ckpt = "longlive_models/models/longlive_base.pt"
+        lora_ckpt = "longlive_models/models/lora.pt"
+
+        # Load generator checkpoint (distilled weights)
+        if os.path.exists(generator_ckpt):
+            print(f"Loading LongLive generator checkpoint from {generator_ckpt}...")
+            try:
+                state_dict = torch.load(generator_ckpt, map_location="cpu", weights_only=False)
+
+                # Extract the actual state dict from various possible keys
+                if "generator_ema" in state_dict:
+                    raw_state_dict = state_dict["generator_ema"]
+                elif "generator" in state_dict:
+                    raw_state_dict = state_dict["generator"]
+                elif "model" in state_dict:
+                    raw_state_dict = state_dict["model"]
+                else:
+                    raw_state_dict = state_dict
+
+                # Clean FSDP prefixes
+                def _clean_key(name: str) -> str:
+                    name = name.replace("_fsdp_wrapped_module.", "")
+                    return name
+
+                cleaned_state_dict = {_clean_key(k): v for k, v in raw_state_dict.items()}
+                missing, unexpected = self.pipeline.generator.load_state_dict(cleaned_state_dict, strict=False)
+
+                if len(missing) > 0:
+                    print(f"  [Warning] {len(missing)} missing params: {missing[:3]}...")
+                if len(unexpected) > 0:
+                    print(f"  [Warning] {len(unexpected)} unexpected params: {unexpected[:3]}...")
+
+                print("  LongLive generator weights loaded successfully!")
+            except Exception as e:
+                print(f"  [Error] Failed to load generator checkpoint: {e}")
+        else:
+            print(f"[Warning] LongLive generator checkpoint not found at {generator_ckpt}")
+            print("         Running with base Wan model (expect ~5x slower performance!)")
+
+        # Load LoRA weights
+        if os.path.exists(lora_ckpt):
+            print(f"Loading LongLive LoRA weights from {lora_ckpt}...")
+            try:
+                import peft
+                from utils.lora_utils import configure_lora_for_model
+
+                # First apply LoRA adapters to the model
+                lora_config = {
+                    "type": "lora",
+                    "rank": 256,
+                    "alpha": 256,
+                    "dropout": 0.0,
+                    "dtype": "bfloat16",
+                }
+                configure_lora_for_model(self.pipeline.generator.model, lora_config)
+
+                # Then load the trained LoRA weights
+                lora_checkpoint = torch.load(lora_ckpt, map_location="cpu", weights_only=False)
+
+                if isinstance(lora_checkpoint, dict) and "generator_lora" in lora_checkpoint:
+                    peft.set_peft_model_state_dict(self.pipeline.generator.model, lora_checkpoint["generator_lora"])
+                else:
+                    peft.set_peft_model_state_dict(self.pipeline.generator.model, lora_checkpoint)
+
+                print("  LongLive LoRA weights loaded successfully!")
+            except ImportError as e:
+                print(f"  [Warning] peft not available, skipping LoRA loading: {e}")
+            except Exception as e:
+                print(f"  [Error] Failed to load LoRA weights: {e}")
+        else:
+            print(f"[Info] LongLive LoRA checkpoint not found at {lora_ckpt}")
 
     def _generate_inputs(self, seed: int) -> Tuple[torch.Tensor, List[str]]:
         """Generate reproducible inputs."""

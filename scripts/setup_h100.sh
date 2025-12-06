@@ -73,9 +73,9 @@ pip install triton || echo "Warning: triton installation may have issues"
 
 # Download model weights - to correct directory
 echo ""
-echo "[8/8] Downloading Wan model weights..."
-pip install 'huggingface_hub[cli]'
-mkdir -p wan_models
+echo "[8/9] Downloading Wan base model weights..."
+pip install 'huggingface_hub[cli]' peft
+mkdir -p wan_models longlive_models
 echo "Downloading Wan2.1-T2V-1.3B from HuggingFace..."
 
 # Use huggingface_hub Python API for more reliable downloads
@@ -86,13 +86,45 @@ import os
 target_dir = "./wan_models/Wan2.1-T2V-1.3B"
 os.makedirs(target_dir, exist_ok=True)
 
-print("Downloading model files...")
+print("Downloading Wan base model files...")
 snapshot_download(
     repo_id="Wan-AI/Wan2.1-T2V-1.3B",
     local_dir=target_dir,
     local_dir_use_symlinks=False
 )
-print("Download complete!")
+print("Wan base model download complete!")
+EOF
+
+# Download LongLive distilled weights (CRITICAL for performance!)
+echo ""
+echo "[9/9] Downloading LongLive distilled weights..."
+echo "This is CRITICAL - without these, performance is 5x slower!"
+python3 << 'EOF'
+from huggingface_hub import snapshot_download
+import os
+
+target_dir = "./longlive_models"
+os.makedirs(target_dir, exist_ok=True)
+
+print("Downloading LongLive distilled model weights...")
+snapshot_download(
+    repo_id="Efficient-Large-Model/LongLive",
+    local_dir=target_dir,
+    local_dir_use_symlinks=False
+)
+print("LongLive weights download complete!")
+
+# Verify the critical files exist
+import os
+critical_files = [
+    "./longlive_models/models/longlive_base.pt",
+    "./longlive_models/models/lora.pt"
+]
+for f in critical_files:
+    if os.path.exists(f):
+        print(f"✓ Found: {f}")
+    else:
+        print(f"✗ Missing: {f}")
 EOF
 
 # Verify model download
