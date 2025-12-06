@@ -103,7 +103,8 @@ class CausalWanSelfAttention(nn.Module):
         block_mask,
         kv_cache=None,
         current_start=0,
-        cache_start=None
+        cache_start=None,
+        frame_seqlen=None
     ):
         r"""
         Args:
@@ -112,6 +113,7 @@ class CausalWanSelfAttention(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             block_mask (BlockMask)
+            frame_seqlen (int, optional): Precomputed frame sequence length to avoid .item() calls
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
         if cache_start is None:
@@ -202,7 +204,9 @@ class CausalWanSelfAttention(nn.Module):
                     block_mask=block_mask
                 )[:, :, :-padded_length].transpose(2, 1)
         else:
-            frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+            # Use passed frame_seqlen to avoid .item() call which breaks torch.compile
+            if frame_seqlen is None:
+                frame_seqlen = int(grid_sizes[0][1:].prod())
             current_start_frame = current_start // frame_seqlen
             roped_query = causal_rope_apply(
                 q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
@@ -408,7 +412,8 @@ class CausalWanAttentionBlock(nn.Module):
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
-        cache_start=None
+        cache_start=None,
+        frame_seqlen=None
     ):
         r"""
         Args:
@@ -417,18 +422,22 @@ class CausalWanAttentionBlock(nn.Module):
             seq_lens(Tensor): Shape [B], length of each sequence in batch
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            frame_seqlen (int, optional): Precomputed frame sequence length to avoid .item() calls
         """
-        num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
+        num_frames = e.shape[1]
+        # Compute frame_seqlen from shape if not provided (avoids .item() calls)
+        if frame_seqlen is None:
+            frame_seqlen = x.shape[1] // num_frames
         # assert e.dtype == torch.float32
         # with amp.autocast(dtype=torch.float32):
         e = (self.modulation.unsqueeze(1) + e).chunk(6, dim=2)
         # assert e[0].dtype == torch.float32
 
-        # self-attention
+        # self-attention - pass frame_seqlen to avoid .item() calls
         self_attn_result = self.self_attn(
             (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2),
             seq_lens, grid_sizes,
-            freqs, block_mask, kv_cache, current_start, cache_start)
+            freqs, block_mask, kv_cache, current_start, cache_start, frame_seqlen=frame_seqlen)
         
         if kv_cache is not None:
             y, cache_update_info = self_attn_result

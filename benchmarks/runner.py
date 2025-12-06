@@ -87,9 +87,20 @@ class BenchmarkRunner:
     def _apply_torch_compile(self):
         """Apply torch.compile to the model."""
         try:
+            # Enable scalar output capture to reduce graph breaks from .item() calls
+            import torch._dynamo
+            torch._dynamo.config.capture_scalar_outputs = True
+
+            # Use default mode instead of reduce-overhead to avoid CUDAGraph issues
+            # with the KV cache mutations
+            compile_mode = self.config.compile_mode
+            if compile_mode == "reduce-overhead":
+                print("Note: Using 'default' mode instead of 'reduce-overhead' to avoid CUDAGraph issues")
+                compile_mode = "default"
+
             self.pipeline.generator.model = torch.compile(
                 self.pipeline.generator.model,
-                mode=self.config.compile_mode,
+                mode=compile_mode,
                 fullgraph=False,
                 dynamic=True
             )
@@ -177,21 +188,31 @@ class BenchmarkRunner:
                     "dropout": 0.0,
                     "dtype": "bfloat16",
                 }
-                configure_lora_for_model(self.pipeline.generator.model, lora_config)
+                # configure_lora_for_model expects: (transformer, model_name, lora_config, is_main_process)
+                lora_model = configure_lora_for_model(
+                    self.pipeline.generator.model,
+                    "generator",  # model_name for generator
+                    lora_config,
+                    is_main_process=True
+                )
+                # Update the generator model reference to the LoRA-wrapped version
+                self.pipeline.generator.model = lora_model
 
                 # Then load the trained LoRA weights
                 lora_checkpoint = torch.load(lora_ckpt, map_location="cpu", weights_only=False)
 
                 if isinstance(lora_checkpoint, dict) and "generator_lora" in lora_checkpoint:
-                    peft.set_peft_model_state_dict(self.pipeline.generator.model, lora_checkpoint["generator_lora"])
+                    peft.set_peft_model_state_dict(lora_model, lora_checkpoint["generator_lora"])
                 else:
-                    peft.set_peft_model_state_dict(self.pipeline.generator.model, lora_checkpoint)
+                    peft.set_peft_model_state_dict(lora_model, lora_checkpoint)
 
                 print("  LongLive LoRA weights loaded successfully!")
             except ImportError as e:
                 print(f"  [Warning] peft not available, skipping LoRA loading: {e}")
             except Exception as e:
                 print(f"  [Error] Failed to load LoRA weights: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             print(f"[Info] LongLive LoRA checkpoint not found at {lora_ckpt}")
 

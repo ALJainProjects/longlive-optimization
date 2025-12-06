@@ -71,10 +71,16 @@ echo ""
 echo "[7/8] Installing triton..."
 pip install triton || echo "Warning: triton installation may have issues"
 
+# Install peft with compatible transformers version
+echo ""
+echo "[8/10] Installing peft with compatible transformers..."
+# Pin transformers to a version compatible with peft
+pip install "transformers>=4.35.0,<4.46.0" "peft>=0.6.0,<0.8.0"
+
 # Download model weights - to correct directory
 echo ""
-echo "[8/9] Downloading Wan base model weights..."
-pip install 'huggingface_hub[cli]' peft
+echo "[9/10] Downloading Wan base model weights..."
+pip install 'huggingface_hub[cli]'
 mkdir -p wan_models longlive_models
 echo "Downloading Wan2.1-T2V-1.3B from HuggingFace..."
 
@@ -97,7 +103,7 @@ EOF
 
 # Download LongLive distilled weights (CRITICAL for performance!)
 echo ""
-echo "[9/9] Downloading LongLive distilled weights..."
+echo "[10/10] Downloading LongLive distilled weights..."
 echo "This is CRITICAL - without these, performance is 5x slower!"
 python3 << 'EOF'
 from huggingface_hub import snapshot_download
