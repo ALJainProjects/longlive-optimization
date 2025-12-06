@@ -71,11 +71,10 @@ echo ""
 echo "[7/8] Installing triton..."
 pip install triton || echo "Warning: triton installation may have issues"
 
-# Install peft with compatible transformers version
+# Install peft and transformers (diffusers requires peft>=0.17.0)
 echo ""
-echo "[8/10] Installing peft with compatible transformers..."
-# Pin transformers to a version compatible with peft
-pip install "transformers>=4.35.0,<4.46.0" "peft>=0.6.0,<0.8.0"
+echo "[8/10] Installing peft and transformers..."
+pip install "transformers>=4.45.0" "peft>=0.17.0"
 
 # Download model weights - to correct directory
 echo ""
